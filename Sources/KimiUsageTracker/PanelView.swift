@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PanelView: View {
     @EnvironmentObject private var store: UsageStore
+    @AppStorage("menuBarLabelStyle") private var style = MenuBarLabelStyle.percent.rawValue
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -9,6 +10,8 @@ struct PanelView: View {
         f.timeStyle = .short
         return f
     }()
+
+    private static let quotaPageURL = URL(string: "https://www.kimi.ai/settings/subscription?tab=quota")!
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -20,6 +23,13 @@ struct PanelView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Picker("Menu bar style", selection: $style) {
+                Text("Percent").tag(MenuBarLabelStyle.percent.rawValue)
+                Text("Bar").tag(MenuBarLabelStyle.bar.rawValue)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
             if store.entries.isEmpty {
                 Text("No usage data yet")
                     .foregroundStyle(.secondary)
@@ -30,9 +40,10 @@ struct PanelView: View {
                             Text(entry.label)
                                 .font(.subheadline.weight(.medium))
                             Spacer()
-                            Text(entry.remainingPercent.map { "\($0)% left" } ?? "--")
+                            Text(entry.usedPercent.map { "\($0)% used" } ?? "--")
                                 .font(.subheadline.monospacedDigit())
                         }
+                        GaugeBar(ratio: entry.usedRatio)
                         HStack {
                             if let used = entry.used, let limit = entry.limit {
                                 Text("\(used) / \(limit) used")
@@ -49,6 +60,17 @@ struct PanelView: View {
                     }
                     .opacity(store.isStale ? 0.55 : 1)
                 }
+            }
+
+            Divider()
+
+            Text("Monthly total usage is only available on the official quota page.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Open official quota page") {
+                NSWorkspace.shared.open(Self.quotaPageURL)
             }
 
             Divider()
@@ -80,5 +102,21 @@ struct PanelView: View {
         }
         .padding(14)
         .frame(width: 300)
+    }
+}
+
+struct GaugeBar: View {
+    let ratio: Double?
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.primary.opacity(0.15))
+                Capsule()
+                    .fill(.primary)
+                    .frame(width: geo.size.width * min(max(ratio ?? 0, 0), 1))
+            }
+        }
+        .frame(height: 6)
     }
 }

@@ -55,9 +55,14 @@ struct LimitEntry {
         return "\(windowSeconds / 60)-minute window"
     }
 
-    var remainingPercent: Int? {
-        guard let remaining, let limit, limit > 0 else { return nil }
-        return Int((Double(remaining) / Double(limit) * 100).rounded())
+    var usedPercent: Int? {
+        guard let used, let limit, limit > 0 else { return nil }
+        return Int((Double(used) / Double(limit) * 100).rounded())
+    }
+
+    var usedRatio: Double? {
+        guard let used, let limit, limit > 0 else { return nil }
+        return min(max(Double(used) / Double(limit), 0), 1)
     }
 
     init?(_ raw: UsageLimit) {
