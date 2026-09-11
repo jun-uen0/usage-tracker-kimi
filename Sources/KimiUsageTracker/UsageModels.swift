@@ -44,15 +44,25 @@ struct LimitEntry {
     let resetTime: Date?
 
     var isFiveHour: Bool { windowSeconds == 300 * 60 }
-    var isWeekly: Bool { windowSeconds >= 7 * 24 * 3600 }
+    var isMonthly: Bool { windowSeconds >= 28 * 24 * 3600 }
+    var isSevenDay: Bool { !isMonthly && windowSeconds >= 7 * 24 * 3600 }
 
     var label: String {
         if isFiveHour { return "5-hour window" }
-        if isWeekly { return "Weekly window" }
+        if isMonthly { return "Monthly window" }
+        if isSevenDay { return "7-day window" }
         let hours = windowSeconds / 3600
         if hours >= 24, hours % 24 == 0 { return "\(hours / 24)-day window" }
         if hours >= 1, windowSeconds % 3600 == 0 { return "\(hours)-hour window" }
         return "\(windowSeconds / 60)-minute window"
+    }
+
+    // Short suffix shown next to the menu bar label for non-5-hour windows.
+    var shortMarker: String? {
+        if isFiveHour { return nil }
+        if isMonthly { return "M" }
+        if isSevenDay { return "7d" }
+        return nil
     }
 
     var usedPercent: Int? {
@@ -63,6 +73,20 @@ struct LimitEntry {
     var usedRatio: Double? {
         guard let used, let limit, limit > 0 else { return nil }
         return min(max(Double(used) / Double(limit), 0), 1)
+    }
+
+    // The window starts one full window before its reset time.
+    var windowStart: Date? {
+        resetTime.map { $0.addingTimeInterval(-TimeInterval(windowSeconds)) }
+    }
+
+    // Fraction of the window already elapsed at `now` (0...1). This is the
+    // even-pace usage allowance: at 50% of the window you should have used
+    // about 50% of the quota. Returns nil when the reset time is unknown.
+    func elapsedFraction(at now: Date) -> Double? {
+        guard let start = windowStart else { return nil }
+        let fraction = now.timeIntervalSince(start) / TimeInterval(windowSeconds)
+        return min(max(fraction, 0), 1)
     }
 
     init?(_ raw: UsageLimit) {

@@ -7,9 +7,13 @@ final class UsageStore: ObservableObject {
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var isStale = false
     @Published private(set) var failure: UsageFetchError?
+    // Wall clock for time-based UI (the pace pointer drifts with time even
+    // between quota refreshes).
+    @Published private(set) var now = Date()
 
     private let client = UsageClient()
     private var timer: Timer?
+    private var clock: Timer?
 
     private var lastGoodURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory,
@@ -23,6 +27,9 @@ final class UsageStore: ObservableObject {
         Task { await refresh() }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.refresh() }
+        }
+        clock = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.now = Date() }
         }
     }
 
@@ -42,7 +49,7 @@ final class UsageStore: ObservableObject {
     }
 
     // The window shown in the menu bar: prefer the 5-hour window; otherwise
-    // fall back to the longest window available (marked weekly in the label).
+    // fall back to the longest window available.
     var primaryEntry: LimitEntry? {
         if let fiveHour = entries.first(where: { $0.isFiveHour }) { return fiveHour }
         return entries.max(by: { $0.windowSeconds < $1.windowSeconds })

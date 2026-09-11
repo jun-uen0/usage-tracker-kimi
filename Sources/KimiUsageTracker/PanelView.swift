@@ -43,7 +43,8 @@ struct PanelView: View {
                             Text(entry.usedPercent.map { "\($0)% used" } ?? "--")
                                 .font(.subheadline.monospacedDigit())
                         }
-                        GaugeBar(ratio: entry.usedRatio)
+                        GaugeBar(ratio: entry.usedRatio ?? 0,
+                                 elapsed: entry.elapsedFraction(at: store.now))
                         HStack {
                             if let used = entry.used, let limit = entry.limit {
                                 Text("\(used) / \(limit) used")
@@ -60,6 +61,11 @@ struct PanelView: View {
                     }
                     .opacity(store.isStale ? 0.55 : 1)
                 }
+                Text("Fill: used. Red marker: even-pace allowance — it moves as time passes. Yellow: using close to or past the pace.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -106,15 +112,30 @@ struct PanelView: View {
 }
 
 struct GaugeBar: View {
-    let ratio: Double?
+    let ratio: Double
+    var elapsed: Double? = nil
+
+    // Usage within this margin of the pace pointer counts as "approaching".
+    private static let nearMargin = 0.03
+
+    private var nearPace: Bool {
+        guard let elapsed else { return false }
+        return ratio >= elapsed - Self.nearMargin
+    }
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(.primary.opacity(0.15))
                 Capsule()
-                    .fill(.primary)
-                    .frame(width: geo.size.width * min(max(ratio ?? 0, 0), 1))
+                    .fill(nearPace ? Color.yellow : Color.primary)
+                    .frame(width: geo.size.width * min(max(ratio, 0), 1))
+                if let elapsed {
+                    Capsule()
+                        .fill(Color.red)
+                        .frame(width: 2)
+                        .offset(x: geo.size.width * min(max(elapsed, 0), 1) - 1)
+                }
             }
         }
         .frame(height: 6)
