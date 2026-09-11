@@ -42,12 +42,17 @@ struct LimitEntry {
     let used: Int?
     let remaining: Int?
     let resetTime: Date?
+    // Web-session entries carry a precise ratio instead of request counts.
+    let ratio: Double?
+    // Overrides the computed label (e.g. "Monthly total").
+    let displayLabel: String?
 
     var isFiveHour: Bool { windowSeconds == 300 * 60 }
     var isMonthly: Bool { windowSeconds >= 28 * 24 * 3600 }
     var isSevenDay: Bool { !isMonthly && windowSeconds >= 7 * 24 * 3600 }
 
     var label: String {
+        if let displayLabel { return displayLabel }
         if isFiveHour { return "5-hour window" }
         if isMonthly { return "Monthly window" }
         if isSevenDay { return "7-day window" }
@@ -70,9 +75,19 @@ struct LimitEntry {
         return Int((Double(used) / Double(limit) * 100).rounded())
     }
 
+    // Menu bar / panel text: integer for request-count entries, one decimal
+    // for ratio-based (web session) entries, matching the official page.
+    var percentText: String? {
+        if let percent = usedPercent { return "\(percent)%" }
+        guard let ratio else { return nil }
+        return String(format: "%.1f%%", min(max(ratio, 0), 1) * 100)
+    }
+
     var usedRatio: Double? {
-        guard let used, let limit, limit > 0 else { return nil }
-        return min(max(Double(used) / Double(limit), 0), 1)
+        if let used, let limit, limit > 0 {
+            return min(max(Double(used) / Double(limit), 0), 1)
+        }
+        return ratio.map { min(max($0, 0), 1) }
     }
 
     // The window starts one full window before its reset time.
@@ -103,6 +118,8 @@ struct LimitEntry {
         used = raw.detail?.used.flatMap(Int.init)
         remaining = raw.detail?.remaining.flatMap(Int.init)
         resetTime = raw.detail?.resetTime.flatMap(Self.parseResetTime)
+        ratio = nil
+        displayLabel = nil
     }
 
     private static func parseResetTime(_ s: String) -> Date? {
@@ -125,6 +142,8 @@ struct UsageSnapshot: Codable {
         let used: Int?
         let remaining: Int?
         let resetTime: Date?
+        let ratio: Double?
+        let displayLabel: String?
     }
 
     init(response: UsageResponse, fetchedAt: Date) {
@@ -133,24 +152,39 @@ struct UsageSnapshot: Codable {
         entries = (response.limits ?? []).compactMap { raw in
             guard let e = LimitEntry(raw) else { return nil }
             return Entry(windowSeconds: e.windowSeconds, limit: e.limit,
-                         used: e.used, remaining: e.remaining, resetTime: e.resetTime)
+                         used: e.used, remaining: e.remaining, resetTime: e.resetTime,
+                         ratio: e.ratio, displayLabel: e.displayLabel)
+        }
+    }
+
+    init(fetchedAt: Date, membershipLevel: String?, entries: [LimitEntry]) {
+        self.fetchedAt = fetchedAt
+        self.membershipLevel = membershipLevel
+        self.entries = entries.map {
+            Entry(windowSeconds: $0.windowSeconds, limit: $0.limit,
+                  used: $0.used, remaining: $0.remaining, resetTime: $0.resetTime,
+                  ratio: $0.ratio, displayLabel: $0.displayLabel)
         }
     }
 
     var limitEntries: [LimitEntry] {
         entries.map { e in
             LimitEntry(windowSeconds: e.windowSeconds, limit: e.limit,
-                       used: e.used, remaining: e.remaining, resetTime: e.resetTime)
+                       used: e.used, remaining: e.remaining, resetTime: e.resetTime,
+                       ratio: e.ratio, displayLabel: e.displayLabel)
         }
     }
 }
 
 extension LimitEntry {
-    init(windowSeconds: Int, limit: Int?, used: Int?, remaining: Int?, resetTime: Date?) {
+    init(windowSeconds: Int, limit: Int?, used: Int?, remaining: Int?, resetTime: Date?,
+         ratio: Double? = nil, displayLabel: String? = nil) {
         self.windowSeconds = windowSeconds
         self.limit = limit
         self.used = used
         self.remaining = remaining
         self.resetTime = resetTime
+        self.ratio = ratio
+        self.displayLabel = displayLabel
     }
 }

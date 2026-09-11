@@ -2,33 +2,51 @@
 
 A lightweight macOS menu bar app that shows your [Kimi Code](https://www.kimi.com/code/) quota at a glance — the Kimi counterpart to menu bar trackers like Claude Usage Tracker.
 
-The menu bar shows how much of your 5-hour window you have used — matching the percentage on the official quota page — in one of two styles: percent capsule or battery-style bar, switchable from the app's panel. Click it for per-window details: per-window gauge bars, used / limit, reset times, plus a shortcut that opens the official quota page.
+The menu bar shows how much of your 5-hour window you have used — matching the percentage on the official quota page — in one of two styles: percent capsule or battery-style bar, switchable from the app's panel. Click it for per-window details: per-window gauge bars with a pace pointer, used / limit, reset times, plus a shortcut that opens the official quota page.
+
+![Panel showing the 5-hour, 7-day, and monthly bars with the pace pointer](docs/screenshot-panel.png)
+
+With a one-time setup (below), the app also tracks the official page's **7-day window** and **monthly total**, at the same precision as the site.
 
 ## Menu bar styles
 
 Pick the style from the segmented control at the top of the panel; the choice is remembered across launches.
 
-- **Percent** (default): a capsule with the used percentage, e.g. `61%`.
-- **Bar**: a battery-style capsule that fills up as the window is used.
+- **Percent** (default): a capsule with the used percentage, e.g. `61.3%`.
+- **Bar**: a battery-style capsule that fills up as the window is used, with a red **pace pointer** marking how much of the window has already elapsed. The pointer drifts to the right as time passes; if your usage reaches it (fill turns yellow), you are consuming faster than an even pace and will hit the limit before reset.
 
-The percentage and the gauge fill both follow the official page and show **usage** (how much is consumed), not remaining. If the API ever reports a weekly (or other long) window without a 5-hour one, the longest window is shown with a small `W` marker, in every style. When the app can't refresh, the last good value stays on screen dimmed.
+The percentage and the gauge fill both follow the official page and show **usage** (how much is consumed), not remaining. If the shown window is not the 5-hour one, a small `M` (monthly) or `7d` marker appears next to it, in every style. When the app can't refresh, the last good value stays on screen dimmed.
 
-## Why there is no monthly total
+## Monthly total & 7-day window (optional)
 
-The official subscription page shows an additional **monthly total usage** figure next to the 5-hour window. That number comes from a web-only API (`GetSubscriptionStats` on `www.kimi.ai`) that requires the browser session's ES256 token — the CLI's access token is rejected (`signing method ES256 is invalid`), and no monthly figure exists on the CLI-accessible `coding/v1/usages` endpoint (its `totalQuota` is empty and `limits[]` only carries rate windows). The 5-hour percentage from `/usages` matches the site's integer part (the site computes decimals from internal units the API does not expose). For the monthly total, use the panel's "Open official quota page" button. This limitation is shared by other trackers, e.g. [onWatch](https://github.com/onllm-dev/onWatch/blob/main/docs/KIMI_SETUP.md).
+The official subscription page shows two figures the CLI API never exposes: the **monthly total usage** and the **7-day window**. Both come from the same web endpoint the page itself calls (`GetSubscriptionStats` on `www.kimi.ai`), which authenticates with the browser session's tokens — the CLI's access token is rejected there, and `coding/v1/usages` only carries the 5-hour window.
+
+To enable them, paste your web session's refresh token once, from the panel:
+
+1. Open the [quota page](https://www.kimi.ai/settings/subscription?tab=quota) and sign in.
+2. DevTools → Application → Local Storage → `https://www.kimi.ai` → copy the value of `refresh_token`.
+3. Paste it into the app's panel ("Save").
+
+From then on the app mints its own short-lived access tokens and refreshes the token rotation automatically. Notes:
+
+- The token is stored in `~/Library/Application Support/usage-tracker-kimi/web-refresh-token` with `0600` permissions and is never logged or sent anywhere except Kimi's own auth endpoint.
+- The server does not invalidate rotated refresh tokens, so the browser session keeps working in parallel.
+- If the web session is removed or expires, the app falls back to the CLI's 5-hour window.
 
 ## How it works
 
 - Reads the access token from the Kimi Code CLI's own sign-in state (`$KIMI_CODE_HOME/credentials` or `~/.kimi-code/credentials`).
-- Calls `GET https://api.kimi.ai/coding/v1/usages` every 60 seconds and renders whatever windows (`limits[]`) the response contains — typically the 5-hour window, and the weekly window when present.
-- Only the **access token** and its expiry are read. The refresh token is never touched, the credentials file is never written, and the token is never stored or logged by this app. Credentials are re-read on every cycle because the CLI rotates short-lived tokens.
+- Calls `GET https://api.kimi.ai/coding/v1/usages` every 60 seconds and renders whatever windows (`limits[]`) the response contains.
+- When the web session is configured, calls `GetSubscriptionStats` instead, which additionally reports the 7-day window and the monthly total at the site's precision; on any web failure the app falls back to the CLI endpoint.
+- Only the **access token** and its expiry are read from the CLI credentials. The CLI's refresh token is never touched, the credentials file is never written, and the token is never stored or logged by this app. CLI credentials are re-read on every cycle because the CLI rotates short-lived tokens.
 - When the token lapses (the CLI renews it the next time you use it), the last good values stay on screen **dimmed** until a fresh read succeeds. On any failure — expired sign-in, network error, unrecognized response format — the app degrades to stale data instead of inventing numbers.
-- The bar gauge is pre-rendered into a template `NSImage` with `ImageRenderer` because `MenuBarExtra` labels ignore fixed frames on arbitrary SwiftUI content (text sizes naturally, shapes collapse). Template rendering keeps it readable in both light and dark menu bars.
+- The bar gauge is pre-rendered into an `NSImage` with `ImageRenderer` because `MenuBarExtra` labels ignore fixed frames on arbitrary SwiftUI content (text sizes naturally, shapes collapse). Base colors resolve against the current menu bar appearance, with the pace pointer drawn in red on top.
 
 ## Privacy boundary
 
 - Reads local sign-in state only to request quota.
-- Sends the access token only to Kimi's quota endpoint.
+- Sends the CLI access token only to Kimi's quota endpoint.
+- The web-session refresh token is stored locally (`0600`) and sent only to Kimi's auth endpoint; the rotated replacement is persisted in its place.
 - Persists only the last good quota snapshot (numbers and timestamps) under `~/Library/Application Support/usage-tracker-kimi/` so stale display survives restarts.
 - No telemetry, analytics, crash reporting, or third-party tracking.
 
@@ -51,7 +69,13 @@ open build/KimiUsageTracker.app
 
 - Signed and notarized releases via GitHub Actions
 - Launch at login
-- Weekly-window presentation: the panel already renders any window the API returns, but the current account's `/usages` response only ever carries the 5-hour window. Surfacing a weekly limit needs either Kimi to expose it on this endpoint or a separate data source; tracked as an open question.
+- Round gauge menu bar style (percent and bar styles are done)
+
+## Similar tools
+
+- [cc-quota](https://github.com/Robin0725/cc-quota) (MIT) — terminal quota checker for Kimi Code and other coding CLIs.
+- [onWatch](https://github.com/onllm-dev/onWatch) — open-source usage tracker for multiple coding agents.
+- [Session Watcher](https://sessionwatcher.com/kimi) — commercial macOS menu bar tracker for Kimi Code (5-hour and weekly quotas).
 
 ## Acknowledgments
 

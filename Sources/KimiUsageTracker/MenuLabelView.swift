@@ -35,10 +35,7 @@ struct MenuLabelView: View {
     }
 
     private var percentLabel: some View {
-        let text: String = {
-            guard let percent = entry?.usedPercent else { return "--%" }
-            return "\(percent)%"
-        }()
+        let text = entry?.percentText ?? "--%"
         return Text(text)
             .font(.system(size: 11, weight: .semibold).monospacedDigit())
             .padding(.horizontal, 6)

@@ -12,6 +12,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var now = Date()
 
     private let client = UsageClient()
+    private let webClient = WebSessionClient()
     private var timer: Timer?
     private var clock: Timer?
 
@@ -34,18 +35,52 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() async {
+        // The web session (when configured) exposes more accurate ratios plus
+        // the 7-day and monthly windows; the CLI API is the fallback.
+        if webClient.isConfigured {
+            switch await webClient.fetchEntries() {
+            case .success(let entries):
+                apply(entries: entries, membershipLevel: membershipLevel)
+                webSessionError = nil
+                return
+            case .failure(let error):
+                webSessionError = error
+            }
+        } else {
+            webSessionError = nil
+        }
+
         switch await client.fetch() {
         case .success(let snapshot):
-            entries = snapshot.limitEntries
-            membershipLevel = snapshot.membershipLevel
-            lastUpdated = snapshot.fetchedAt
-            isStale = false
-            failure = nil
-            persist(snapshot)
+            apply(entries: snapshot.limitEntries, membershipLevel: snapshot.membershipLevel)
         case .failure(let error):
             failure = error
             isStale = lastUpdated != nil
         }
+    }
+
+    private func apply(entries: [LimitEntry], membershipLevel: String?) {
+        self.entries = entries
+        if let membershipLevel { self.membershipLevel = membershipLevel }
+        lastUpdated = Date()
+        isStale = false
+        failure = nil
+        persist(UsageSnapshot(fetchedAt: Date(), membershipLevel: self.membershipLevel,
+                              entries: entries))
+    }
+
+    @Published private(set) var webSessionError: WebSessionError?
+
+    var isWebSessionConfigured: Bool { webClient.isConfigured }
+
+    func saveWebRefreshToken(_ token: String) throws {
+        try webClient.saveRefreshToken(token)
+        webSessionError = nil
+    }
+
+    func removeWebRefreshToken() {
+        webClient.removeRefreshToken()
+        webSessionError = nil
     }
 
     // The window shown in the menu bar: prefer the 5-hour window; otherwise
@@ -68,6 +103,20 @@ final class UsageStore: ObservableObject {
             return "Network error while reading quota."
         case .decoding:
             return "Quota response format not recognized."
+        }
+    }
+
+    var webSessionHint: String? {
+        switch webSessionError {
+        case .none, .notConfigured: return nil
+        case .refreshRejected:
+            return "Web session expired. Re-paste the refresh token from the browser."
+        case .http(let code):
+            return "Web quota request failed (HTTP \(code))."
+        case .network:
+            return "Network error while reading web quota."
+        case .decoding:
+            return "Web quota response format changed."
         }
     }
 
